@@ -28,21 +28,31 @@ ocpSecretsStoreCsiVault:
     # -- Vault Kubernetes auth mount path on the hub (Validated Patterns default)
     hubMountPath: "hub"
 
-  # -- Mirrors openshift-external-secrets-chart `ocpExternalSecrets.caProvider`: when enabled and `tls.vaultCACertPath` is empty, `vaultCACertPath` defaults per hub vs spoke (same branching as ESO). CSI reads a PEM path on the Vault CSI provider pod; `defaultVaultCACertPath` should match where you mount the same trust material as the type/name/key/namespace objects below.
-  # @default -- see nested keys
+  # -- Mirrors openshift-external-secrets-chart `ocpExternalSecrets.caProvider`: when enabled and `tls.vaultCACertPath` is empty, `vaultCACertPath` defaults per hub vs spoke (same branching as ESO). CSI reads a PEM path on the Vault CSI provider pod; `defaultVaultCACertPath` should match where you mount the same trust material as the type/name/key/namespace objects below. Nested: `syncProviderCaConfigMap`, `hostCluster`, `clientCluster`.
   caProvider:
     # -- When false, `vaultCACertPath` is omitted unless `tls.vaultCACertPath` is set (same idea as ESO omitting `caProvider` when disabled).
     enabled: true
-    # -- When true, Helm `lookup` copies CA PEM from cluster objects (ESO parity + hub ingress router-ca) into a ConfigMap in `targetNamespace`. You must mount that ConfigMap on the Vault CSI provider DaemonSet at `mountDir` (items key = `keyInConfigMap`). Preset `auto`: hub-style uses openshift-ingress/router-ca for *.apps; spoke uses Secret hub-ca (ESO clientCluster).
+    # -- TLS CA sync for Vault HTTPS: `pemLiteral` / `createConfigMap` for GitOps; optional `lookup` when `useLookup` is true. See chart README (Argo CD section).
     syncProviderCaConfigMap:
+      # -- When true, emit a ConfigMap (unless `createConfigMap` is false) when PEM is available, and set SPC `vaultCACertPath` for the mount path under `mountDir`.
       enabled: false
-      # Namespace where the Vault CSI provider pod runs (pattern: vault). Must allow the aap-config release SA to create ConfigMaps here, or sync out-of-band.
+      # -- Inline PEM (full bundle). GitOps-friendly: SOPS-encrypted values, Argo CD helm parameters, or a pattern override file. When set, used instead of cluster lookup.
+      pemLiteral: ""
+      # -- When true, use helm lookup() against the live API (hub ingress CA, ESO-style hub-ca, etc.). False by default because Argo CD client-side render has no API.
+      useLookup: false
+      # -- When false, this chart does not create the ConfigMap; create and mount it elsewhere. SPC still receives `vaultCACertPath` at `mountDir`/`keyInConfigMap` when sync is enabled.
+      createConfigMap: true
+      # -- Namespace for the synced ConfigMap (pattern: `vault` where the Vault CSI provider runs). The release ServiceAccount must be allowed to create ConfigMaps here unless you manage the CM out-of-band.
       targetNamespace: vault
-      # Stable default so the hashicorp-vault chart can mount this name without coupling to another release's Helm fullname.
+      # -- ConfigMap name to create or reference; mount this name on the Vault CSI provider DaemonSet.
       configMapName: openshift-sscsi-vault-vault-tls-ca
+      # -- Directory on the Vault CSI provider pod where the ConfigMap is mounted (must match HashiCorp Vault chart `csi.volumeMounts`).
       mountDir: /etc/pki/vault-ca
+      # -- Key within the ConfigMap whose value is the PEM file (single file item in the volume).
       keyInConfigMap: vault-tls-ca.pem
+      # -- Preset for `useLookup` only: `auto` (hub vs spoke), `ingressrouterca`, `esohubkuberootca`, `esospokehubca`.
       preset: auto
+      # -- Router CA ConfigMap reference when preset resolves to ingress router CA (`useLookup` path).
       ingressRouterCa:
         namespace: openshift-ingress
         name: router-ca
@@ -73,9 +83,11 @@ ocpSecretsStoreCsiVault:
 
   # -- TLS options for the Vault CSI provider (see HashiCorp vault-csi-provider docs). When `vaultSkipTLSVerify` is `"true"`, `vaultCACertPath` is not emitted (verify is off).
   tls:
+    # -- Pass through to the vault-csi-provider as `vaultSkipTLSVerify` (`"true"` / `"false"` strings).
     vaultSkipTLSVerify: "false"
     # -- If set, passed as vaultCACertPath (must exist where the CSI provider can read it). When empty and `caProvider.enabled`, defaults to `caProvider.hostCluster.defaultVaultCACertPath` or `caProvider.clientCluster.defaultVaultCACertPath` by hub/spoke (mirrors ESO ClusterSecretStore caProvider branch).
     vaultCACertPath: ""
+    # -- Optional SNI override for Vault HTTPS (`vaultTLSServerName` in the SPC).
     vaultTLSServerName: ""
 
 # -- Global values aligned with openshift-external-secrets chart patterns

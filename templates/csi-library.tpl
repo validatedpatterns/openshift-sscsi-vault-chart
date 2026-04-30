@@ -98,10 +98,16 @@ spec:
 {{- $effCACert := $explicitCACert }}
 {{- if ne $vaultTlsSkip "true" }}
 {{- if and (eq $effCACert "") (default false $sync.enabled) }}
-{{- $pem := trim (include "openshift_sscsi_vault.vaultTlsCaPemFromCluster" .) }}
-{{- if ne $pem "" }}
 {{- $mountDir := $sync.mountDir | default "/etc/pki/vault-ca" | trim }}
 {{- $keyFile := $sync.keyInConfigMap | default "vault-tls-ca.pem" | trim }}
+{{- $pem := trim (include "openshift_sscsi_vault.vaultTlsCaPemFromCluster" .) }}
+{{- $createCM := true }}
+{{- if hasKey $sync "createConfigMap" }}
+{{- $createCM = $sync.createConfigMap }}
+{{- end }}
+{{- if ne $pem "" }}
+{{- $effCACert = printf "%s/%s" $mountDir $keyFile }}
+{{- else if not $createCM }}
 {{- $effCACert = printf "%s/%s" $mountDir $keyFile }}
 {{- end }}
 {{- end }}

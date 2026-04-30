@@ -1,11 +1,8 @@
 {{- if .Values.ocpSecretsStoreCsiVault.secretProviderClass.installDefaultManifests }}
 {{- $ca := include "openshift_sscsi_vault.syncVaultCsiTlsCaConfigMapYaml" . | trim }}
+{{- include "openshift_sscsi_vault.renderSyncCaConfigMap" . }}
 {{- $spc := include "openshift_sscsi_vault.secretproviderclass" . | trim }}
 {{- $rbac := include "openshift_sscsi_vault.workload_rbac" . | trim }}
-{{- if $ca }}
-{{ $ca }}
----
-{{- end }}
 {{- if $spc }}
 {{ $spc }}
 {{- end }}
