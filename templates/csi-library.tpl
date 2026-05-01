@@ -97,7 +97,7 @@ spec:
 {{- $sync := $cap.syncProviderCaConfigMap | default dict }}
 {{- $effCACert := $explicitCACert }}
 {{- if ne $vaultTlsSkip "true" }}
-{{- if and (eq $effCACert "") (default false $sync.enabled) }}
+{{- if and $capEnabled (eq $effCACert "") (default false $sync.enabled) }}
 {{- $mountDir := $sync.mountDir | default "/etc/pki/vault-ca" | trim }}
 {{- $keyFile := $sync.keyInConfigMap | default "vault-tls-ca.pem" | trim }}
 {{- $pem := trim (include "openshift_sscsi_vault.vaultTlsCaPemFromCluster" .) }}
