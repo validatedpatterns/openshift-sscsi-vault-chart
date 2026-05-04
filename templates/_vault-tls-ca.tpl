@@ -11,9 +11,18 @@ openshift-ingress / external-secrets objects (same presets as ESO).
 Optional: `syncProviderCaConfigMap.injectTrustedCabundle: true` with `createConfigMap: true` emits an empty
 ConfigMap labeled `config.openshift.io/inject-trusted-cabundle: "true"` so the Cluster Network Operator injects
 the cluster merged CA bundle (`ca-bundle.crt` by default; see OpenShift "Certificate injection using Operators" / custom PKI docs).
-Default annotation `argocd.argoproj.io/ignore-differences` points at `/data/<trustedCabundleDataKey>` for Argo CD;
-mount the bundle via a projected volume `items` + `optional: true` on the Vault CSI DaemonSet so only that path is required (see README).
+Default annotation `argocd.argoproj.io/ignore-differences` is a small YAML document with **jsonPointers** (`/data/<key>`)
+and **jqPathExpressions** (`.data["<key>"]`) so Argo / OpenShift GitOps can ignore CNO-injected PEM keys whose names contain dots
+(jq must use bracket form—`.data.ca-bundle.crt` is invalid). Mount the bundle via projected volume `items` + `optional: true`
+on the Vault CSI DaemonSet (see README).
 */}}
+{{- define "openshift_sscsi_vault.argocdIgnoreInjectedTrustedDataYaml" -}}
+{{- $k := . | trim }}
+jsonPointers:
+- /data/{{ $k }}
+jqPathExpressions:
+- .data["{{ $k }}"]
+{{- end }}
 {{- define "openshift_sscsi_vault.vaultTlsCaPemFromCluster" -}}
 {{- $cap := .Values.ocpSecretsStoreCsiVault.caProvider | default dict }}
 {{- $sync := $cap.syncProviderCaConfigMap | default dict }}
@@ -110,7 +119,7 @@ mount the bundle via a projected volume `items` + `optional: true` on the Vault 
 {{- end }}
 {{- $cmAnns := dict }}
 {{- if $ignoreArgocd }}
-{{- $_ := set $cmAnns "argocd.argoproj.io/ignore-differences" (printf "/data/%s" $injectKey) }}
+{{- $_ := set $cmAnns "argocd.argoproj.io/ignore-differences" (include "openshift_sscsi_vault.argocdIgnoreInjectedTrustedDataYaml" $injectKey) }}
 {{- end }}
 {{- $cmAnns = mergeOverwrite $cmAnns ($sync.configMapAnnotations | default dict) }}
 {{- $cmName := $sync.configMapName | default "" | trim }}
