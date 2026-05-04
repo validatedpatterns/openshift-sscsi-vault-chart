@@ -39,6 +39,10 @@ ocpSecretsStoreCsiVault:
       injectTrustedCabundle: true
       # -- Data key populated by OpenShift after injection (see "Certificate injection using Operators" / custom PKI docs). Used for `vaultCACertPath` when `injectTrustedCabundle` is true.
       trustedCabundleDataKey: ca-bundle.crt
+      # -- When `injectTrustedCabundle` and this chart renders the TLS ConfigMap: set `argocd.argoproj.io/ignore-differences` to a JSON pointer `/data/<trustedCabundleDataKey>` so Argo CD can skip drift on CNO-managed content (requires Argo CD / OpenShift GitOps that honors per-resource ignore-differences, or duplicate the rule under the Application `spec.ignoreDifferences`; see README).
+      argocdIgnoreInjectedTrustedCabundleData: true
+      # -- Extra annotations merged onto the rendered sync TLS ConfigMap (overrides `argocdIgnoreInjectedTrustedCabundleData` annotation keys when the same key is set).
+      configMapAnnotations: {}
       # -- Inline PEM (full bundle). GitOps-friendly: SOPS-encrypted values, Argo CD helm parameters, or a pattern override file. When set, used instead of cluster lookup for CM content when `createConfigMap` is true.
       pemLiteral: ""
       # -- When true, use helm lookup() against the live API (hub ingress CA, ESO-style hub-ca, etc.). False by default because Argo CD client-side render has no API.

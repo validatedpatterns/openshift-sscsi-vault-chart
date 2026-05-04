@@ -11,6 +11,8 @@ openshift-ingress / external-secrets objects (same presets as ESO).
 Optional: `syncProviderCaConfigMap.injectTrustedCabundle: true` with `createConfigMap: true` emits an empty
 ConfigMap labeled `config.openshift.io/inject-trusted-cabundle: "true"` so the Cluster Network Operator injects
 the cluster merged CA bundle (`ca-bundle.crt` by default; see OpenShift "Certificate injection using Operators" / custom PKI docs).
+Default annotation `argocd.argoproj.io/ignore-differences` points at `/data/<trustedCabundleDataKey>` for Argo CD;
+mount the bundle via a projected volume `items` + `optional: true` on the Vault CSI DaemonSet so only that path is required (see README).
 */}}
 {{- define "openshift_sscsi_vault.vaultTlsCaPemFromCluster" -}}
 {{- $cap := .Values.ocpSecretsStoreCsiVault.caProvider | default dict }}
@@ -101,6 +103,16 @@ the cluster merged CA bundle (`ca-bundle.crt` by default; see OpenShift "Certifi
 {{- $inject = $sync.injectTrustedCabundle }}
 {{- end }}
 {{- if $inject }}
+{{- $injectKey := $sync.trustedCabundleDataKey | default "ca-bundle.crt" | trim }}
+{{- $ignoreArgocd := true }}
+{{- if and (hasKey $sync "argocdIgnoreInjectedTrustedCabundleData") (kindIs "bool" $sync.argocdIgnoreInjectedTrustedCabundleData) }}
+{{- $ignoreArgocd = $sync.argocdIgnoreInjectedTrustedCabundleData }}
+{{- end }}
+{{- $cmAnns := dict }}
+{{- if $ignoreArgocd }}
+{{- $_ := set $cmAnns "argocd.argoproj.io/ignore-differences" (printf "/data/%s" $injectKey) }}
+{{- end }}
+{{- $cmAnns = mergeOverwrite $cmAnns ($sync.configMapAnnotations | default dict) }}
 {{- $cmName := $sync.configMapName | default "" | trim }}
 {{- if eq $cmName "" }}
 {{- $cmName = "openshift-sscsi-vault-vault-tls-ca" }}
@@ -115,6 +127,10 @@ metadata:
     app.kubernetes.io/name: openshift-sscsi-vault
     app.kubernetes.io/component: vault-csi-tls-ca
     config.openshift.io/inject-trusted-cabundle: "true"
+{{- if $cmAnns }}
+  annotations:
+{{- toYaml $cmAnns | nindent 4 }}
+{{- end }}
 data: {}
 {{- else }}
 {{- $pem := trim (include "openshift_sscsi_vault.vaultTlsCaPemFromCluster" .) }}
