@@ -100,12 +100,19 @@ spec:
 {{- if and $capEnabled (eq $effCACert "") (default false $sync.enabled) }}
 {{- $mountDir := $sync.mountDir | default "/etc/pki/vault-ca" | trim }}
 {{- $keyFile := $sync.keyInConfigMap | default "vault-tls-ca.pem" | trim }}
+{{- $injectKey := $sync.trustedCabundleDataKey | default "ca-bundle.crt" | trim }}
+{{- $inject := true }}
+{{- if and (hasKey $sync "injectTrustedCabundle") (kindIs "bool" $sync.injectTrustedCabundle) }}
+{{- $inject = $sync.injectTrustedCabundle }}
+{{- end }}
 {{- $pem := trim (include "openshift_sscsi_vault.vaultTlsCaPemFromCluster" .) }}
 {{- $createCM := true }}
 {{- if hasKey $sync "createConfigMap" }}
 {{- $createCM = $sync.createConfigMap }}
 {{- end }}
-{{- if ne $pem "" }}
+{{- if $inject }}
+{{- $effCACert = printf "%s/%s" $mountDir $injectKey }}
+{{- else if ne $pem "" }}
 {{- $effCACert = printf "%s/%s" $mountDir $keyFile }}
 {{- else if not $createCM }}
 {{- $effCACert = printf "%s/%s" $mountDir $keyFile }}

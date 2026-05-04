@@ -7,6 +7,10 @@ or set `createConfigMap: false` and provide the ConfigMap + mount out-of-band wh
 
 Optional: `useLookup: true` for cluster-side helm (install/upgrade or template --dry-run=server) to copy from
 openshift-ingress / external-secrets objects (same presets as ESO).
+
+Optional: `syncProviderCaConfigMap.injectTrustedCabundle: true` with `createConfigMap: true` emits an empty
+ConfigMap labeled `config.openshift.io/inject-trusted-cabundle: "true"` so the Cluster Network Operator injects
+the cluster merged CA bundle (`ca-bundle.crt` by default; see OpenShift "Certificate injection using Operators" / custom PKI docs).
 */}}
 {{- define "openshift_sscsi_vault.vaultTlsCaPemFromCluster" -}}
 {{- $cap := .Values.ocpSecretsStoreCsiVault.caProvider | default dict }}
@@ -92,6 +96,27 @@ openshift-ingress / external-secrets objects (same presets as ESO).
 {{- $createCM = $sync.createConfigMap }}
 {{- end }}
 {{- if and (default false $sync.enabled) $createCM }}
+{{- $inject := true }}
+{{- if and (hasKey $sync "injectTrustedCabundle") (kindIs "bool" $sync.injectTrustedCabundle) }}
+{{- $inject = $sync.injectTrustedCabundle }}
+{{- end }}
+{{- if $inject }}
+{{- $cmName := $sync.configMapName | default "" | trim }}
+{{- if eq $cmName "" }}
+{{- $cmName = "openshift-sscsi-vault-vault-tls-ca" }}
+{{- end }}
+{{- $targetNs := $sync.targetNamespace | default "vault" | trim }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $cmName | quote }}
+  namespace: {{ $targetNs | quote }}
+  labels:
+    app.kubernetes.io/name: openshift-sscsi-vault
+    app.kubernetes.io/component: vault-csi-tls-ca
+    config.openshift.io/inject-trusted-cabundle: "true"
+data: {}
+{{- else }}
 {{- $pem := trim (include "openshift_sscsi_vault.vaultTlsCaPemFromCluster" .) }}
 {{- if ne $pem "" }}
 {{- $cmName := $sync.configMapName | default "" | trim }}
@@ -111,6 +136,7 @@ metadata:
 data:
   {{ $keyFile | quote }}: |
 {{ $pem | nindent 4 }}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

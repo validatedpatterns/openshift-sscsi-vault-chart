@@ -24,7 +24,11 @@ tests:
           installDefaultManifests: true
     asserts:
       - hasDocuments:
-          count: 4
+          count: 5
+      - containsDocument:
+          kind: ConfigMap
+          apiVersion: v1
+          any: true
       - containsDocument:
           kind: ServiceAccount
           apiVersion: v1
@@ -69,7 +73,11 @@ tests:
             namespace: my-ns
     asserts:
       - hasDocuments:
-          count: 2
+          count: 3
+      - containsDocument:
+          kind: ConfigMap
+          apiVersion: v1
+          any: true
       - containsDocument:
           kind: ClusterRoleBinding
           apiVersion: rbac.authorization.k8s.io/v1

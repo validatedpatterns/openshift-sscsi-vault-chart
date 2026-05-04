@@ -3,8 +3,7 @@
 # @default -- see nested keys
 ocpSecretsStoreCsiVault:
   secretProviderClass:
-    # -- When true, render SecretProviderClass + RBAC from this chart's templates (standalone install).
-    # Consuming charts typically set this false and use `include` on the named templates instead.
+    # -- When true with `enabled`, render sync TLS ConfigMap (when configured), SecretProviderClass, and workload RBAC from this chart (standalone install). When `enabled` is false, renders nothing from this path. Consuming charts typically set this false and use `include` on the named templates instead.
     installDefaultManifests: false
     # -- Create the SecretProviderClass (used by named template and by installDefaultManifests)
     enabled: true
@@ -28,20 +27,24 @@ ocpSecretsStoreCsiVault:
     # -- Vault Kubernetes auth mount path on the hub (Validated Patterns default)
     hubMountPath: "hub"
 
-  # -- Mirrors openshift-external-secrets-chart `ocpExternalSecrets.caProvider`: when enabled and `tls.vaultCACertPath` is empty, `vaultCACertPath` is chosen from `syncProviderCaConfigMap` (default: path to Ansible-managed CM) or else hub/spoke `defaultVaultCACertPath` when sync is disabled. CSI reads a PEM path on the Vault CSI provider pod. Nested: `syncProviderCaConfigMap`, `hostCluster`, `clientCluster`.
+  # -- Mirrors openshift-external-secrets-chart `ocpExternalSecrets.caProvider`: when enabled and `tls.vaultCACertPath` is empty, `vaultCACertPath` is chosen from `syncProviderCaConfigMap` (default: CNO-injected cluster trust at `mountDir`/`trustedCabundleDataKey`) or else hub/spoke `defaultVaultCACertPath` when sync is disabled. CSI reads a PEM path on the Vault CSI provider pod. Nested: `syncProviderCaConfigMap`, `hostCluster`, `clientCluster`.
   caProvider:
     # -- When false, `vaultCACertPath` is omitted unless `tls.vaultCACertPath` is set (same idea as ESO omitting `caProvider` when disabled).
     enabled: true
-    # -- TLS CA for Vault HTTPS when `tls.vaultSkipTLSVerify` is `"false"`: default expects ConfigMap `configMapName` mounted at `mountDir` (created by **rhvp.cluster_utils** vault playbook / `vault_ss_csi_*` tasks, or set `pemLiteral` / `createConfigMap`+`useLookup` instead). See chart README.
+    # -- TLS CA for Vault HTTPS when `tls.vaultSkipTLSVerify` is `"false"`: by default the chart emits a CNO-injected trusted CA ConfigMap (`injectTrustedCabundle`) so `vaultCACertPath` uses the cluster merged bundle (`trustedCabundleDataKey`). For the legacy **rhvp.cluster_utils** Ansible PEM ConfigMap (`vault-tls-ca.pem`), set `injectTrustedCabundle: false`, `createConfigMap: false`, and keep `keyInConfigMap` aligned with Ansible; or disable Ansible route CM injection if this chart owns the same `configMapName`. See chart README.
     syncProviderCaConfigMap:
-      # -- When true with `tls.vaultCACertPath` empty, set SPC `vaultCACertPath` to `mountDir`/`keyInConfigMap` (trust bundle on the Vault CSI provider pod). When `createConfigMap` is true and PEM is available, also render a ConfigMap manifest.
+      # -- When true with `tls.vaultCACertPath` empty, set SPC `vaultCACertPath` to `mountDir`/`keyInConfigMap` (trust bundle on the Vault CSI provider pod). When `createConfigMap` is true and PEM is available, or `injectTrustedCabundle` is true, also render a ConfigMap manifest (PEM vs injection modes are mutually exclusive).
       enabled: true
+      # -- When true with `createConfigMap` true (default), render a ConfigMap with label `config.openshift.io/inject-trusted-cabundle: "true"` and empty `data` so the Cluster Network Operator injects the cluster-wide merged CA bundle (system + Proxy trustedCA). Argo-safe without `lookup`/`pemLiteral`. Sets `vaultCACertPath` to `mountDir`/`trustedCabundleDataKey` (default `ca-bundle.crt`). Mutually exclusive with rendered PEM content; set `injectTrustedCabundle: false` to use PEM/`lookup` or an out-of-band ConfigMap.
+      injectTrustedCabundle: true
+      # -- Data key populated by OpenShift after injection (see "Certificate injection using Operators" / custom PKI docs). Used for `vaultCACertPath` when `injectTrustedCabundle` is true.
+      trustedCabundleDataKey: ca-bundle.crt
       # -- Inline PEM (full bundle). GitOps-friendly: SOPS-encrypted values, Argo CD helm parameters, or a pattern override file. When set, used instead of cluster lookup for CM content when `createConfigMap` is true.
       pemLiteral: ""
       # -- When true, use helm lookup() against the live API (hub ingress CA, ESO-style hub-ca, etc.). False by default because Argo CD client-side render has no API.
       useLookup: false
-      # -- When false (default), this chart does not create the ConfigMap — **rhvp.cluster_utils** creates `configMapName` in `vault` and workload namespaces. SPC still gets `vaultCACertPath` at `mountDir`/`keyInConfigMap`. Set true to let Helm emit the CM when `pemLiteral` is set or `useLookup` returns PEM.
-      createConfigMap: false
+      # -- When true (default with `injectTrustedCabundle`), Helm emits the ConfigMap (injection-labeled or PEM from `pemLiteral`/`useLookup`). When false, GitOps/Ansible must create `configMapName`; SPC still uses `mountDir`/`keyInConfigMap` unless `injectTrustedCabundle` is true (then `trustedCabundleDataKey`).
+      createConfigMap: true
       # -- Namespace for the synced ConfigMap when `createConfigMap` is true (Vault CSI provider namespace in typical patterns).
       targetNamespace: vault
       # -- ConfigMap name; must match **rhvp.cluster_utils** `vault_ss_csi_route_ca_configmap_name` default (`openshift-sscsi-vault-vault-tls-ca`).
