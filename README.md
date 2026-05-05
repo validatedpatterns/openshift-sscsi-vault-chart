@@ -1,6 +1,6 @@
 # openshift-sscsi-vault
 
-![Version: 0.0.17](https://img.shields.io/badge/Version-0.0.17-informational?style=flat-square)
+![Version: 0.0.18](https://img.shields.io/badge/Version-0.0.18-informational?style=flat-square)
 
 Helm chart (library-style) for Vault Secrets Store CSI on OpenShift: hub Vault URL, Kubernetes auth mount/role parity with openshift-external-secrets-chart patterns, and workload RBAC. Consuming charts should render named templates via include (see README); optional bundled manifests are off by default.
 
@@ -27,6 +27,14 @@ Named templates:
 - **`openshift_sscsi_vault.secretproviderclass`** — SPC; when sync is enabled, sets **`vaultCACertPath`** to **`mountDir`/`keyInConfigMap`** when PEM is present, to **`mountDir`/`trustedCabundleDataKey`** when **`injectTrustedCabundle`** is true, or to **`mountDir`/`keyInConfigMap`** when **`createConfigMap: false`** (you supply the ConfigMap and mount separately).
 
 Mount the synced (or pre-provisioned) ConfigMap on the **Vault CSI provider** DaemonSet at **`caProvider.syncProviderCaConfigMap.mountDir`** (HashiCorp Vault chart **`csi.volumes`** / **`csi.volumeMounts`**; Validated Patterns often use **`extraValueFiles`** — see aap-starter-kit **`overrides/values-vault-csi-tls-ca.yaml`**).
+
+### Namespaces: TLS ConfigMap vs SecretProviderClass
+
+The synced TLS **`ConfigMap`** is created in **`caProvider.syncProviderCaConfigMap.targetNamespace`** (default **`vault`**), not in the Helm release namespace. Mount it on the **Vault CSI provider** pods there. **`SecretProviderClass`**, the workload **ServiceAccount**, and related namespaced RBAC are rendered in **`ocpSecretsStoreCsiVault.rbac.serviceAccount.namespace`** (where consuming workloads reference the SPC). This chart does not mount the CA ConfigMap into the workload namespace; **`vaultCACertPath`** is a filesystem path on the **Vault CSI provider** pod after you configure that DaemonSet’s volume mounts.
+
+### Multiple charts or duplicate dependencies
+
+Helm does not deduplicate manifests across umbrella charts or subchart aliases. If several consumers each render **`renderSyncCaConfigMap`** with **`createConfigMap: true`** and the same **`configMapName`** and **`targetNamespace`**, they emit the same object — only one **`ConfigMap`** exists in the cluster, but repeated applies can cause GitOps noise or ownership clashes if snippets differ. Prefer a single owner (**`createConfigMap: true`**) and set **`createConfigMap: false`** elsewhere, or use distinct **`configMapName`** / **`targetNamespace`** and align Vault CSI mounts and **`mountDir`** accordingly. **`ClusterRoleBinding`** names include **`Release.Name`**, so separate releases stay distinct at the cluster scope even when the ConfigMap name is shared.
 
 ### Argo CD and TLS CA material
 
