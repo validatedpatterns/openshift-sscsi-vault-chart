@@ -9,7 +9,7 @@ keywords:
   - secrets-store-csi-driver
   - vault
 name: openshift-sscsi-vault
-version: 0.1.1
+version: 0.2.0
 dependencies:
   - name: vault
     version: 0.32.0

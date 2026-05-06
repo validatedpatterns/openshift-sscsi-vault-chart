@@ -1,6 +1,6 @@
 # openshift-sscsi-vault
 
-![Version: 0.1.1](https://img.shields.io/badge/Version-0.1.1-informational?style=flat-square)
+![Version: 0.2.0](https://img.shields.io/badge/Version-0.2.0-informational?style=flat-square)
 
 OpenShift Vault Secrets Store CSI: optional synced TLS trust ConfigMap for the provider, HashiCorp Vault CSI provider DaemonSet (hub or spoke), projected trust mount, and OpenShift SCC wiring. Per-application SecretProviderClass manifests use the vp-sscsi-spc library chart.
 
@@ -40,7 +40,7 @@ Set **`ocpSecretsStoreCsiVault.vaultCsiProvider.enabled: false`** only if you wa
 **Where it runs**
 
 - Install on **each** cluster (hub and relevant spokes) that runs the Vault CSI **provider** for SSCSI workloads.
-- Spokes without a local Vault **server** should set **`vault.global.externalVaultAddr`** (or rely on app-level SPC address overrides) to reach central Vault.
+- Spokes without a local Vault **server** must set **`vault.global.externalVaultAddr`** to the reachable hub Vault URL (for example **`https://vault-vault.apps.<hubClusterDomain>`**, consistent with **openshift-external-secrets** `ClusterSecretStore` when **`vault.externalAddress`** is empty). Derive this in **clustergroup** values so spokes do not hand-maintain a separate file.
 
 **Helm release namespace and the trust ConfigMap**
 
@@ -50,7 +50,7 @@ Set **`ocpSecretsStoreCsiVault.vaultCsiProvider.enabled: false`** only if you wa
 
 **Validated Patterns**
 
-- Hub and spoke: add or adjust `clusterGroup.applications` and overrides; set **`vault.global.externalVaultAddr`** on spokes as needed.
+- Hub and spoke: add **`clusterGroup.applications`** and overrides; merge **`vault.global.externalVaultAddr`** for spokes from **`global.hubClusterDomain`** (or equivalent) in clustergroup.
 
 ### Validated Patterns clustergroup application
 
@@ -106,6 +106,7 @@ Ensure **`vault`** (or your chosen release namespace) exists under `clusterGroup
 
 ### Named templates
 
+- **`openshift_sscsi_vault.syncProviderVaultCACertPath`** — single filesystem path for the CA PEM the **SecretProviderClass** should use (`vaultCACertPath`) when trust is mounted by this chart: **`mountDir`/`trustedCabundleDataKey`** if **`injectTrustedCabundle`** is true (CNO cluster/proxy bundle), else **`mountDir`/`keyInConfigMap`**. Parent charts that render SPCs outside **vp-sscsi-spc** can `include` this helper so paths stay aligned with **`syncProviderCaConfigMap`**.
 - **`openshift_sscsi_vault.vaultTlsCaPemFromCluster`** — PEM for the synced bundle: **`syncProviderCaConfigMap.pemLiteral`** first (Argo CD / `helm template` safe), else optional **`useLookup: true`** cluster copy (ESO-style hub/spoke presets; hub ingress `router-ca` / `router-ca-certs` plus optional `kube-root-ca.crt` concat). Default **`useLookup: false`** because Argo renders manifests without a live API.
 - **`openshift_sscsi_vault.syncVaultCsiTlsCaConfigMapYaml`** — ConfigMap manifest when sync is enabled, **`createConfigMap`** is true, and either PEM from **`vaultTlsCaPemFromCluster`** is non-empty **or** **`syncProviderCaConfigMap.injectTrustedCabundle`** is true (OpenShift `config.openshift.io/inject-trusted-cabundle` label; CNO fills **`trustedCabundleDataKey`**, default **`ca-bundle.crt`**).
 - **`openshift_sscsi_vault.renderSyncCaConfigMap`** — ConfigMap + trailing `---` when non-empty (convenience).
@@ -134,7 +135,7 @@ Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`*
 * v0.0.17: **`argocd.argoproj.io/ignore-differences`** now embeds **`jsonPointers`** and **`jqPathExpressions`** for the injected data key (correct jq for keys like **`ca-bundle.crt`**)
 * v0.0.18: Default injected trust drift ignore now targets full **`/data`** (**`jqPathExpressions: [.data]`**) to reduce persistent OutOfSync when injected keys vary
 * v0.1.0: Split responsibilities by scope: this chart now focuses on cluster-wide Vault CSI trust/config components only; app-level SecretProviderClass rendering moves to a dedicated SPC chart
-* v0.1.1: Bundle HashiCorp **`vault`** subchart for Vault **CSI provider**, default projected trust mount aligned with synced **`ConfigMap`**, OpenShift **`privileged`** SCC **RoleBinding**; install release in **`vault`** namespace by default so projection works
+* v0.2.0: Bundle HashiCorp **`vault`** subchart for Vault **CSI provider**, default projected trust mount aligned with synced **`ConfigMap`**, OpenShift **`privileged`** SCC **RoleBinding**; install release in **`vault`** namespace by default so projection works
 
 ## Requirements
 
@@ -171,7 +172,7 @@ Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`*
 | ocpSecretsStoreCsiVault.vaultCsiProvider | object | `{"enabled":true,"openshiftPrivilegedSCCRoleBinding":{"enabled":true}}` | HashiCorp Vault Helm subchart: deploys the Vault CSI provider DaemonSet and related RBAC when enabled. Disable if you only render trust `ConfigMap` templates from another release (not recommended for new installs). |
 | ocpSecretsStoreCsiVault.vaultCsiProvider.openshiftPrivilegedSCCRoleBinding | object | `{"enabled":true}` | When true with CSI enabled on OpenShift, grant the provider ServiceAccount the `privileged` SCC. |
 | vault | object | see nested keys | HashiCorp `vault` subchart (https://github.com/hashicorp/vault-helm). Defaults: CSI provider only (no Vault server), OpenShift paths and UBI images. Keep `csi.volumes` ConfigMap `name` aligned with `ocpSecretsStoreCsiVault.caProvider.syncProviderCaConfigMap.configMapName` (Helm values do not cross-reference keys). Install this Helm release into the **same namespace** as that ConfigMap (default `vault`) so the projected volume can mount it. |
-| vault.global.externalVaultAddr | string | `""` | Spokes / external Vault: set to the reachable Vault URL (for example https://vault-vault.apps.<hubClusterDomain>). |
+| vault.global.externalVaultAddr | string | `""` | Hub Vault API URL for CSI `VAULT_ADDR` when `csi.agent.enabled` is false (required on spokes unless you set it from the clustergroup layer). Example: `https://vault-vault.apps.<hubClusterDomain>`. |
 
 ----------------------------------------------
 Autogenerated from chart metadata using [helm-docs v1.14.2](https://github.com/norwoodj/helm-docs/releases/v1.14.2)

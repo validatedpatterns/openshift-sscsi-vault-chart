@@ -38,3 +38,25 @@ false
 false
 {{- end -}}
 {{- end }}
+
+{{/*
+Filesystem path to the Vault TLS CA file on the CSI provider pod when using **openshift-sscsi-vault** projected trust.
+Matches `caProvider.syncProviderCaConfigMap`: CNO proxy bundle key (`injectTrustedCabundle`) vs PEM key (`keyInConfigMap`).
+Usage: {{ include "openshift_sscsi_vault.syncProviderVaultCACertPath" . }}
+*/}}
+{{- define "openshift_sscsi_vault.syncProviderVaultCACertPath" -}}
+{{- $cap := .Values.ocpSecretsStoreCsiVault.caProvider | default dict }}
+{{- $sync := $cap.syncProviderCaConfigMap | default dict }}
+{{- $mount := $sync.mountDir | default "/etc/pki/vault-ca" | trim | trimSuffix "/" }}
+{{- $inject := true }}
+{{- if and (hasKey $sync "injectTrustedCabundle") (kindIs "bool" $sync.injectTrustedCabundle) }}
+{{- $inject = $sync.injectTrustedCabundle }}
+{{- end }}
+{{- if $inject }}
+{{- $key := $sync.trustedCabundleDataKey | default "ca-bundle.crt" | trim }}
+{{- printf "%s/%s" $mount $key }}
+{{- else }}
+{{- $key := $sync.keyInConfigMap | default "vault-tls-ca.pem" | trim }}
+{{- printf "%s/%s" $mount $key }}
+{{- end }}
+{{- end }}

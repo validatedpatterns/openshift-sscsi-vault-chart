@@ -78,7 +78,7 @@ clusterGroup:
 vault:
   global:
     openshift: true
-    # -- Spokes / external Vault: set to the reachable Vault URL (for example https://vault-vault.apps.<hubClusterDomain>).
+    # -- Hub Vault API URL for CSI `VAULT_ADDR` when `csi.agent.enabled` is false (required on spokes unless you set it from the clustergroup layer). Example: `https://vault-vault.apps.<hubClusterDomain>`.
     externalVaultAddr: ""
   injector:
     enabled: false
