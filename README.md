@@ -1,6 +1,6 @@
 # openshift-sscsi-vault
 
-![Version: 0.0.19](https://img.shields.io/badge/Version-0.0.19-informational?style=flat-square)
+![Version: 0.1.0](https://img.shields.io/badge/Version-0.1.0-informational?style=flat-square)
 
 Helm chart for cluster-wide Vault Secrets Store CSI support on OpenShift. It focuses on provider-facing trust material (optional synced CA ConfigMap) across hub, spoke, and external Vault topologies. App-specific SecretProviderClass manifests are split into a dedicated chart.
 
@@ -109,7 +109,7 @@ Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`*
 * v0.0.16: CNO inject **`ConfigMap`** defaults **`argocd.argoproj.io/ignore-differences`** to **`/data/<trustedCabundleDataKey>`** (toggle **`argocdIgnoreInjectedTrustedCabundleData`**); optional **`configMapAnnotations`**
 * v0.0.17: **`argocd.argoproj.io/ignore-differences`** now embeds **`jsonPointers`** and **`jqPathExpressions`** for the injected data key (correct jq for keys like **`ca-bundle.crt`**)
 * v0.0.18: Default injected trust drift ignore now targets full **`/data`** (**`jqPathExpressions: [.data]`**) to reduce persistent OutOfSync when injected keys vary
-* v0.0.19: Split responsibilities by scope: this chart now focuses on cluster-wide Vault CSI trust/config components only; app-level SecretProviderClass rendering moves to a dedicated SPC chart
+* v0.1.0: Split responsibilities by scope: this chart now focuses on cluster-wide Vault CSI trust/config components only; app-level SecretProviderClass rendering moves to a dedicated SPC chart
 
 ## Values
 
