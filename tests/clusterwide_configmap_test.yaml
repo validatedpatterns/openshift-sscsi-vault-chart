@@ -1,0 +1,60 @@
+suite: Cluster-wide Vault CSI CA ConfigMap rendering
+templates:
+  - templates/csi-library.tpl
+  - templates/_vault-tls-ca.tpl
+  - templates/install-default-manifests.yaml
+release:
+  name: release-test
+tests:
+  - it: renders nothing when cluster-wide manifests are disabled
+    template: templates/install-default-manifests.yaml
+    set:
+      ocpSecretsStoreCsiVault:
+        clusterWide:
+          installDefaultManifests: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders trusted CA injection ConfigMap by default
+    template: templates/install-default-manifests.yaml
+    set:
+      ocpSecretsStoreCsiVault:
+        clusterWide:
+          installDefaultManifests: true
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - equal:
+          path: metadata.labels["config.openshift.io/inject-trusted-cabundle"]
+          value: "true"
+      - equal:
+          path: metadata.namespace
+          value: vault
+      - equal:
+          path: metadata.name
+          value: openshift-sscsi-vault-vault-tls-ca
+      - isEmpty:
+          path: data
+
+  - it: uses configured target namespace and configmap name
+    template: templates/install-default-manifests.yaml
+    set:
+      ocpSecretsStoreCsiVault:
+        clusterWide:
+          installDefaultManifests: true
+        caProvider:
+          syncProviderCaConfigMap:
+            targetNamespace: vault-custom
+            configMapName: vault-provider-trust
+    documentSelector:
+      path: kind
+      value: ConfigMap
+    asserts:
+      - equal:
+          path: metadata.namespace
+          value: vault-custom
+      - equal:
+          path: metadata.name
+          value: vault-provider-trust

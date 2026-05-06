@@ -5,41 +5,44 @@
 
 {{ template "chart.description" . }}
 
-This chart is used by the Validated Patterns to configure SSCSI
+This chart is used by the Validated Patterns to configure cluster-wide Vault CSI support.
 
-### Consuming as a library (any parent chart)
+### Scope and chart split
 
-Merge your values into the same shape as this chart’s `values.yaml` (`ocpSecretsStoreCsiVault`, `global`, `clusterGroup`), then build a subchart-style context and render **in this order** (same `$vaultCtx` for all `include` calls):
+This repository now owns cluster-wide components only. Specifically:
+
+- Optional synced CA ConfigMap for the Vault CSI provider namespace (`caProvider.syncProviderCaConfigMap`)
+- Hub/spoke/external-aware CA source resolution helpers (`vaultTlsCaPemFromCluster`)
+
+Application-owned SecretProviderClass resources should live in a separate SPC-focused chart and be included by each workload chart that needs Vault CSI objects.
+
+### Cluster-wide usage
+
+Install this chart as the single owner of provider trust material:
 
 ```yaml
-{{`{{- $vaultCtx := dict "Chart" $sc.Chart "Capabilities" $sc.Capabilities "Release" $sc.Release "Values" $vaultVals }}
-{{- include "openshift_sscsi_vault.renderSyncCaConfigMap" $vaultCtx }}
-{{- include "openshift_sscsi_vault.secretproviderclass" $vaultCtx }}
----
-{{- include "openshift_sscsi_vault.workload_rbac" $vaultCtx }}
-`}}
+ocpSecretsStoreCsiVault:
+  clusterWide:
+    installDefaultManifests: true
 ```
 
-Named templates:
+Set `installDefaultManifests: false` when reusing only named templates.
+
+### Named templates
 
 - **`openshift_sscsi_vault.vaultTlsCaPemFromCluster`** — PEM for the synced bundle: **`syncProviderCaConfigMap.pemLiteral`** first (Argo CD / `helm template` safe), else optional **`useLookup: true`** cluster copy (ESO-style hub/spoke presets; hub ingress `router-ca` / `router-ca-certs` plus optional `kube-root-ca.crt` concat). Default **`useLookup: false`** because Argo renders manifests without a live API.
 - **`openshift_sscsi_vault.syncVaultCsiTlsCaConfigMapYaml`** — ConfigMap manifest when sync is enabled, **`createConfigMap`** is true, and either PEM from **`vaultTlsCaPemFromCluster`** is non-empty **or** **`syncProviderCaConfigMap.injectTrustedCabundle`** is true (OpenShift `config.openshift.io/inject-trusted-cabundle` label; CNO fills **`trustedCabundleDataKey`**, default **`ca-bundle.crt`**).
 - **`openshift_sscsi_vault.renderSyncCaConfigMap`** — ConfigMap + trailing `---` when non-empty (convenience).
-- **`openshift_sscsi_vault.secretproviderclass`** — SPC; when sync is enabled, sets **`vaultCACertPath`** to **`mountDir`/`keyInConfigMap`** when PEM is present, to **`mountDir`/`trustedCabundleDataKey`** when **`injectTrustedCabundle`** is true, or to **`mountDir`/`keyInConfigMap`** when **`createConfigMap: false`** (you supply the ConfigMap and mount separately).
 
-Mount the synced (or pre-provisioned) ConfigMap on the **Vault CSI provider** DaemonSet at **`caProvider.syncProviderCaConfigMap.mountDir`** (HashiCorp Vault chart **`csi.volumes`** / **`csi.volumeMounts`**; Validated Patterns often use **`extraValueFiles`** — see aap-starter-kit **`overrides/values-vault-csi-tls-ca.yaml`**).
+Mount the synced (or pre-provisioned) ConfigMap on the **Vault CSI provider** DaemonSet at **`caProvider.syncProviderCaConfigMap.mountDir`** (HashiCorp Vault chart **`csi.volumes`** / **`csi.volumeMounts`**; Validated Patterns often use **`extraValueFiles`**).
 
-### Namespaces: TLS ConfigMap vs SecretProviderClass
+### Namespaces
 
-The synced TLS **`ConfigMap`** is created in **`caProvider.syncProviderCaConfigMap.targetNamespace`** (default **`vault`**), not in the Helm release namespace. Mount it on the **Vault CSI provider** pods there. **`SecretProviderClass`**, the workload **ServiceAccount**, and related namespaced RBAC are rendered in **`ocpSecretsStoreCsiVault.rbac.serviceAccount.namespace`** (where consuming workloads reference the SPC). This chart does not mount the CA ConfigMap into the workload namespace; **`vaultCACertPath`** is a filesystem path on the **Vault CSI provider** pod after you configure that DaemonSet’s volume mounts.
-
-### Multiple charts or duplicate dependencies
-
-Helm does not deduplicate manifests across umbrella charts or subchart aliases. If several consumers each render **`renderSyncCaConfigMap`** with **`createConfigMap: true`** and the same **`configMapName`** and **`targetNamespace`**, they emit the same object — only one **`ConfigMap`** exists in the cluster, but repeated applies can cause GitOps noise or ownership clashes if snippets differ. Prefer a single owner (**`createConfigMap: true`**) and set **`createConfigMap: false`** elsewhere, or use distinct **`configMapName`** / **`targetNamespace`** and align Vault CSI mounts and **`mountDir`** accordingly. **`ClusterRoleBinding`** names include **`Release.Name`**, so separate releases stay distinct at the cluster scope even when the ConfigMap name is shared.
+The synced TLS **`ConfigMap`** is created in **`caProvider.syncProviderCaConfigMap.targetNamespace`** (default **`vault`**), not in the Helm release namespace. Mount it on the **Vault CSI provider** pods there.
 
 ### Argo CD and TLS CA material
 
-Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`** does not see the cluster API. By default **`syncProviderCaConfigMap.enabled: true`**, **`createConfigMap: true`**, and **`injectTrustedCabundle: true`**: the chart renders a **`ConfigMap`** labeled **`config.openshift.io/inject-trusted-cabundle: "true"`** (empty **`data`** until the Cluster Network Operator fills **`trustedCabundleDataKey`**, default **`ca-bundle.crt`**). The ConfigMap includes **`argocd.argoproj.io/ignore-differences`** as a small **YAML** document with **`jsonPointers`** (`/data`) and **`jqPathExpressions`** (`.data`) so drift tooling ignores the CNO-managed trust bundle map. Disable with **`argocdIgnoreInjectedTrustedCabundleData: false`**. If your Argo / OpenShift GitOps build does not honor per-resource ignore rules, duplicate both entries under the **Application** **`spec.ignoreDifferences`** for that **`ConfigMap`** and use sync option **`RespectIgnoreDifferences=true`**. Mount only that key on the Vault CSI DaemonSet with a **`projected`** volume (**`configMap.items`** + **`optional: true`**) so the pod tolerates the key appearing after CNO injection (see aap-starter-kit **`overrides/values-vault-csi-tls-ca.yaml`**). The SecretProviderClass sets **`vaultCACertPath`** to **`mountDir`/`trustedCabundleDataKey`**. For the previous **rhvp.cluster_utils** flow (Ansible creates **`vault-tls-ca.pem`**), set **`injectTrustedCabundle: false`**, **`createConfigMap: false`**, and avoid duplicate applies for the same **`configMapName`**. Alternatively set **`pemLiteral`** or **`createConfigMap: true`** with **`useLookup: true`** for cluster-side Helm only.
+Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`** does not see the cluster API. By default **`syncProviderCaConfigMap.enabled: true`**, **`createConfigMap: true`**, and **`injectTrustedCabundle: true`**: the chart renders a **`ConfigMap`** labeled **`config.openshift.io/inject-trusted-cabundle: "true"`** (empty **`data`** until the Cluster Network Operator fills **`trustedCabundleDataKey`**, default **`ca-bundle.crt`**). The ConfigMap includes **`argocd.argoproj.io/ignore-differences`** as a small **YAML** document with **`jsonPointers`** (`/data`) and **`jqPathExpressions`** (`.data`) so drift tooling ignores the CNO-managed trust bundle map. Disable with **`argocdIgnoreInjectedTrustedCabundleData: false`**. If your Argo / OpenShift GitOps build does not honor per-resource ignore rules, duplicate both entries under the **Application** **`spec.ignoreDifferences`** for that **`ConfigMap`** and use sync option **`RespectIgnoreDifferences=true`**. Mount only that key on the Vault CSI DaemonSet with a **`projected`** volume (**`configMap.items`** + **`optional: true`**) so the pod tolerates the key appearing after CNO injection. For the previous **rhvp.cluster_utils** flow (Ansible creates **`vault-tls-ca.pem`**), set **`injectTrustedCabundle: false`**, **`createConfigMap: false`**, and avoid duplicate applies for the same **`configMapName`**. Alternatively set **`pemLiteral`** or **`createConfigMap: true`** with **`useLookup: true`** for cluster-side Helm only.
 
 ### Notable changes
 
@@ -48,12 +51,13 @@ Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`*
 * v0.0.9: Normalize `vaultSkipTLSVerify` to `"true"`/`"false"` strings for HashiCorp vault-csi-provider (`strconv.ParseBool`)
 * v0.0.11: Handle injection of CA material
 * v0.0.12: CA sync via optional `lookup` (`caProvider.syncProviderCaConfigMap`), `renderSyncCaConfigMap`, hub ingress CA fallbacks; parent charts use includes only
-* v0.0.13: Argo-safe TLS CA — `pemLiteral`, `useLookup` (default false), `createConfigMap`; `vaultCACertPath` when PEM is supplied or the ConfigMap is managed out-of-band
+* v0.0.13: Argo-safe TLS CA - `pemLiteral`, `useLookup` (default false), `createConfigMap`; `vaultCACertPath` when PEM is supplied or the ConfigMap is managed out-of-band
 * v0.0.14: Default **`syncProviderCaConfigMap.enabled: true`**, **`createConfigMap: false`**, and **`vaultSkipTLSVerify: "false"`** so strict TLS targets the ConfigMap name/key that **rhvp.cluster_utils** provisions; set **`syncProviderCaConfigMap.enabled: false`** to fall back to hub/spoke **`defaultVaultCACertPath`** only
-* v0.0.15: **`injectTrustedCabundle`** defaults to **true** in chart **`values.yaml`** and in named templates when the key is absent or non-boolean (CNO-injected trust bundle aligned with cluster **`Proxy`** / **`trustedCA`**); set **`injectTrustedCabundle: false`** (and typically **`createConfigMap: false`**) for legacy **rhvp.cluster_utils** **`vault-tls-ca.pem`**, **`pemLiteral`**, or **`useLookup`** PEM paths. Standalone **`installDefaultManifests`** emits the sync TLS **`ConfigMap`** only when **`secretProviderClass.enabled`** is **true** (same gate as **`SecretProviderClass`** / workload RBAC).
-* v0.0.16: CNO inject **`ConfigMap`** defaults **`argocd.argoproj.io/ignore-differences`** to **`/data/<trustedCabundleDataKey>`** (toggle **`argocdIgnoreInjectedTrustedCabundleData`**); optional **`configMapAnnotations`**. Patterns should mount the bundle via **`projected`** **`items`** + **`optional: true`** on the Vault CSI DaemonSet (see aap-starter-kit **`values-vault-csi-tls-ca.yaml`**).
-* v0.0.17: **`argocd.argoproj.io/ignore-differences`** now embeds **`jsonPointers`** and **`jqPathExpressions`** for the injected data key (correct jq for keys like **`ca-bundle.crt`**).
-* v0.0.18: Default injected trust drift ignore now targets full **`/data`** (**`jqPathExpressions: [.data]`**) to reduce persistent OutOfSync when injected keys vary.
+* v0.0.15: **`injectTrustedCabundle`** defaults to **true** in chart **`values.yaml`** and in named templates when the key is absent or non-boolean (CNO-injected trust bundle aligned with cluster **`Proxy`** / **`trustedCA`**); set **`injectTrustedCabundle: false`** (and typically **`createConfigMap: false`**) for legacy **rhvp.cluster_utils** **`vault-tls-ca.pem`**, **`pemLiteral`**, or **`useLookup`** PEM paths
+* v0.0.16: CNO inject **`ConfigMap`** defaults **`argocd.argoproj.io/ignore-differences`** to **`/data/<trustedCabundleDataKey>`** (toggle **`argocdIgnoreInjectedTrustedCabundleData`**); optional **`configMapAnnotations`**
+* v0.0.17: **`argocd.argoproj.io/ignore-differences`** now embeds **`jsonPointers`** and **`jqPathExpressions`** for the injected data key (correct jq for keys like **`ca-bundle.crt`**)
+* v0.0.18: Default injected trust drift ignore now targets full **`/data`** (**`jqPathExpressions: [.data]`**) to reduce persistent OutOfSync when injected keys vary
+* v0.0.19: Split responsibilities by scope: this chart now focuses on cluster-wide Vault CSI trust/config components only; app-level SecretProviderClass rendering moves to a dedicated SPC chart
 
 {{ template "chart.homepageLine" . }}
 
@@ -66,4 +70,3 @@ Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`*
 {{ template "chart.valuesSection" . }}
 
 {{ template "helm-docs.versionFooter" . }}
-

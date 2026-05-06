@@ -1,13 +1,12 @@
 ---
 apiVersion: v2
 description: >-
-  Helm chart (library-style) for Vault Secrets Store CSI on OpenShift: hub Vault URL,
-  Kubernetes auth mount/role parity with openshift-external-secrets-chart patterns, and workload RBAC.
-  Consuming charts should render named templates via include (see README); optional bundled manifests
-  are off by default.
+  Helm chart for cluster-wide Vault Secrets Store CSI support on OpenShift. It focuses on
+  provider-facing trust material (optional synced CA ConfigMap) across hub, spoke, and external
+  Vault topologies. App-specific SecretProviderClass manifests are split into a dedicated chart.
 keywords:
   - openshift
   - secrets-store-csi-driver
   - vault
 name: openshift-sscsi-vault
-version: 0.0.18
+version: 0.0.19
