@@ -28,6 +28,59 @@ ocpSecretsStoreCsiVault:
 
 Set `installDefaultManifests: false` when reusing only named templates.
 
+### Validated Patterns clustergroup application
+
+Declare this chart under `clusterGroup.applications` in your pattern cluster values (for example `values-hub.yaml`). The clustergroup chart renders an Argo CD `Application` per entry.
+
+**1. Chart published in the pattern Helm repo (multi-source)**
+
+```yaml
+clusterGroup:
+  namespaces:
+    vault: {}
+    config-demo: {}
+  argoProjects:
+    - config-demo
+  applications:
+    openshift-sscsi-vault:
+      name: openshift-sscsi-vault-cluster
+      namespace: config-demo
+      argoProject: config-demo
+      chart: openshift-sscsi-vault
+      chartVersion: 0.0.*
+      extraValueFiles:
+        - $patternref/overrides/values-openshift-sscsi-vault-cluster.yaml
+      ignoreDifferences:
+        - group: ""
+          kind: ConfigMap
+          name: openshift-sscsi-vault-vault-tls-ca
+          namespace: vault
+          jsonPointers:
+            - /data
+          jqPathExpressions:
+            - .data
+```
+
+Adjust `name`, `namespace`, `argoProject`, and override file paths to your pattern. The `ignoreDifferences` block matches the default CNO-injected trust `ConfigMap` when you use `injectTrustedCabundle`; drop or change it if your CA sync mode does not need Argo to ignore `/data`.
+
+**2. Chart in its own Git repository (multi-source)**
+
+```yaml
+clusterGroup:
+  applications:
+    openshift-sscsi-vault:
+      name: openshift-sscsi-vault-cluster
+      namespace: config-demo
+      argoProject: config-demo
+      repoURL: https://github.com/yourorg/openshift-sscsi-vault-chart.git
+      path: "."
+      chartVersion: main
+      extraValueFiles:
+        - $patternref/overrides/values-openshift-sscsi-vault-cluster.yaml
+```
+
+Ensure target namespaces exist under `clusterGroup.namespaces` and the Argo `AppProject` is listed under `clusterGroup.argoProjects`.
+
 ### Named templates
 
 - **`openshift_sscsi_vault.vaultTlsCaPemFromCluster`** — PEM for the synced bundle: **`syncProviderCaConfigMap.pemLiteral`** first (Argo CD / `helm template` safe), else optional **`useLookup: true`** cluster copy (ESO-style hub/spoke presets; hub ingress `router-ca` / `router-ca-certs` plus optional `kube-root-ca.crt` concat). Default **`useLookup: false`** because Argo renders manifests without a live API.
