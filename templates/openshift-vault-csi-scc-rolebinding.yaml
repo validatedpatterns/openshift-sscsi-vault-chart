@@ -1,0 +1,45 @@
+{{/*
+Full name for the HashiCorp vault subchart release (CSI ServiceAccount is "{{ vault.fullname }}-csi-provider").
+*/}}
+{{- define "openshift_sscsi_vault.vaultCsiFullname" -}}
+{{- $v := .Values.vault | default dict }}
+{{- if $v.fullnameOverride }}
+{{- $v.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default "vault" $v.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+---
+{{- $vp := .Values.ocpSecretsStoreCsiVault.vaultCsiProvider | default dict }}
+{{- $rb := $vp.openshiftPrivilegedSCCRoleBinding | default dict }}
+{{- $rbEnabled := true }}
+{{- if and $rb (hasKey $rb "enabled") }}
+{{- $rbEnabled = $rb.enabled }}
+{{- end }}
+{{- $vault := .Values.vault | default dict }}
+{{- $vg := $vault.global | default dict }}
+{{- $csi := $vault.csi | default dict }}
+{{- if and (default false $vp.enabled) (eq ($vg.openshift | toString) "true") (eq ($csi.enabled | toString) "true") $rbEnabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "openshift_sscsi_vault.vaultCsiFullname" . }}-csi-provider-privileged-scc
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service | quote }}
+    app.kubernetes.io/name: {{ .Chart.Name | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:privileged
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "openshift_sscsi_vault.vaultCsiFullname" . }}-csi-provider
+    namespace: {{ .Release.Namespace | quote }}
+{{- end }}

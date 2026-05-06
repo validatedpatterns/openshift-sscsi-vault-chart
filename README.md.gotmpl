@@ -9,12 +9,16 @@ This chart is used by the Validated Patterns to configure cluster-wide Vault CSI
 
 ### Scope and chart split
 
-This repository now owns cluster-wide components only. Specifically:
+This chart owns **cluster-wide Vault SSCSI infrastructure** on OpenShift:
 
-- Optional synced CA ConfigMap for the Vault CSI provider namespace (`caProvider.syncProviderCaConfigMap`)
-- Hub/spoke/external-aware CA source resolution helpers (`vaultTlsCaPemFromCluster`)
+- Optional synced TLS trust **`ConfigMap`** for the provider (`caProvider.syncProviderCaConfigMap`) and named-template helpers (`vaultTlsCaPemFromCluster`, `renderSyncCaConfigMap`, and related).
+- **Vault CSI provider** DaemonSet and upstream CSI RBAC via the bundled **HashiCorp `vault` Helm subchart** (`vault` values), when **`ocpSecretsStoreCsiVault.vaultCsiProvider.enabled`** is **true** (default).
+- **Projected trust volume** on the provider pods (`vault.csi.volumes` / `volumeMounts`), defaulting to the same **`ConfigMap`** name as **`caProvider.syncProviderCaConfigMap.configMapName`** so the bundle this chart manages is mounted at **`/etc/pki/vault-ca`**.
+- **`privileged` SCC** `RoleBinding` for the provider ServiceAccount on OpenShift when **`vaultCsiProvider.openshiftPrivilegedSCCRoleBinding.enabled`** is **true** (default).
 
-Application-owned SecretProviderClass resources should live in a separate SPC-focused chart and be included by each workload chart that needs Vault CSI objects.
+It does **not** run the Vault **server** by default (`vault.server.enabled: false`). Enable server-related values only when you intentionally colocate a server with this release.
+
+**Per-application** `SecretProviderClass` objects stay in the **`vp-sscsi-spc`** library (**per app**, with **`applicationKey`** / **`ssCsiWorkloadAuth`** on Validated Patterns where used).
 
 ### Cluster-wide usage
 
@@ -28,6 +32,27 @@ ocpSecretsStoreCsiVault:
 
 Set `installDefaultManifests: false` when reusing only named templates.
 
+Set **`ocpSecretsStoreCsiVault.vaultCsiProvider.enabled: false`** only if you want trust **`ConfigMap`** templates without installing the Vault CSI provider from this chart (unusual for new installs).
+
+### Hub, spoke, and clusters without a local Vault server
+
+**Trust `ConfigMap`** is still **cluster-local** (CNO-injected bundle, PEM, or lookup modes as before). **Vault CSI provider** pods in this release read that material via **`vault.csi`** volume projection.
+
+**Where it runs**
+
+- Install on **each** cluster (hub and relevant spokes) that runs the Vault CSI **provider** for SSCSI workloads.
+- Spokes without a local Vault **server** should set **`vault.global.externalVaultAddr`** (or rely on app-level SPC address overrides) to reach central Vault.
+
+**Helm release namespace and the trust ConfigMap**
+
+- The synced trust **`ConfigMap`** is created in **`caProvider.syncProviderCaConfigMap.targetNamespace`** (default **`vault`**).
+- With **`vaultCsiProvider.enabled: true`** (default), the **HashiCorp `vault` subchart** deploys the CSI **DaemonSet into the Helm release namespace**. Projected `ConfigMap` volumes **cannot** reference another namespace, so **install this Application into `vault`** (or set **`targetNamespace`** and **`vault.csi.volumes`** / names together so the `ConfigMap` and DaemonSet share one namespace).
+- Legacy layouts that applied only the **`ConfigMap`** from a **config** namespace while the provider lived elsewhere should either **move this Application to `vault`** or disable **`vaultCsiProvider`** here and manage the provider separately.
+
+**Validated Patterns**
+
+- Hub and spoke: add or adjust `clusterGroup.applications` and overrides; set **`vault.global.externalVaultAddr`** on spokes as needed.
+
 ### Validated Patterns clustergroup application
 
 Declare this chart under `clusterGroup.applications` in your pattern cluster values (for example `values-hub.yaml`). The clustergroup chart renders an Argo CD `Application` per entry.
@@ -38,16 +63,15 @@ Declare this chart under `clusterGroup.applications` in your pattern cluster val
 clusterGroup:
   namespaces:
     vault: {}
-    config-demo: {}
   argoProjects:
-    - config-demo
+    - hub
   applications:
     openshift-sscsi-vault:
       name: openshift-sscsi-vault-cluster
-      namespace: config-demo
-      argoProject: config-demo
+      namespace: vault
+      argoProject: hub
       chart: openshift-sscsi-vault
-      chartVersion: 0.0.*
+      chartVersion: 0.2.*
       extraValueFiles:
         - $patternref/overrides/values-openshift-sscsi-vault-cluster.yaml
       ignoreDifferences:
@@ -61,7 +85,7 @@ clusterGroup:
             - .data
 ```
 
-Adjust `name`, `namespace`, `argoProject`, and override file paths to your pattern. The `ignoreDifferences` block matches the default CNO-injected trust `ConfigMap` when you use `injectTrustedCabundle`; drop or change it if your CA sync mode does not need Argo to ignore `/data`.
+Use **`namespace: vault`** so the bundled CSI provider can project the trust `ConfigMap` rendered into **`vault`**. Adjust `name`, `argoProject`, and overrides to your pattern. The `ignoreDifferences` block matches the default CNO-injected trust `ConfigMap` when you use `injectTrustedCabundle`.
 
 **2. Chart in its own Git repository (multi-source)**
 
@@ -70,8 +94,8 @@ clusterGroup:
   applications:
     openshift-sscsi-vault:
       name: openshift-sscsi-vault-cluster
-      namespace: config-demo
-      argoProject: config-demo
+      namespace: vault
+      argoProject: hub
       repoURL: https://github.com/yourorg/openshift-sscsi-vault-chart.git
       path: "."
       chartVersion: main
@@ -79,7 +103,7 @@ clusterGroup:
         - $patternref/overrides/values-openshift-sscsi-vault-cluster.yaml
 ```
 
-Ensure target namespaces exist under `clusterGroup.namespaces` and the Argo `AppProject` is listed under `clusterGroup.argoProjects`.
+Ensure **`vault`** (or your chosen release namespace) exists under `clusterGroup.namespaces` and the Argo `AppProject` is listed under `clusterGroup.argoProjects`.
 
 ### Named templates
 
@@ -87,11 +111,11 @@ Ensure target namespaces exist under `clusterGroup.namespaces` and the Argo `App
 - **`openshift_sscsi_vault.syncVaultCsiTlsCaConfigMapYaml`** — ConfigMap manifest when sync is enabled, **`createConfigMap`** is true, and either PEM from **`vaultTlsCaPemFromCluster`** is non-empty **or** **`syncProviderCaConfigMap.injectTrustedCabundle`** is true (OpenShift `config.openshift.io/inject-trusted-cabundle` label; CNO fills **`trustedCabundleDataKey`**, default **`ca-bundle.crt`**).
 - **`openshift_sscsi_vault.renderSyncCaConfigMap`** — ConfigMap + trailing `---` when non-empty (convenience).
 
-Mount the synced (or pre-provisioned) ConfigMap on the **Vault CSI provider** DaemonSet at **`caProvider.syncProviderCaConfigMap.mountDir`** (HashiCorp Vault chart **`csi.volumes`** / **`csi.volumeMounts`**; Validated Patterns often use **`extraValueFiles`**).
+With **`vaultCsiProvider.enabled: true`**, this chart sets **`vault.csi.volumes`** / **`volumeMounts`** to project the default trust **`ConfigMap`** at **`/etc/pki/vault-ca`**. Override **`vault.csi`** if you use a different bundle name or proxy-only **`ConfigMap`** layout; keep names aligned with **`caProvider.syncProviderCaConfigMap`**.
 
 ### Namespaces
 
-The synced TLS **`ConfigMap`** is created in **`caProvider.syncProviderCaConfigMap.targetNamespace`** (default **`vault`**), not in the Helm release namespace. Mount it on the **Vault CSI provider** pods there.
+The trust **`ConfigMap`** is created in **`caProvider.syncProviderCaConfigMap.targetNamespace`**. The CSI **DaemonSet** uses the **Helm release namespace**; for the default projected volume to work, those must match (see **Helm release namespace and the trust ConfigMap** above).
 
 ### Argo CD and TLS CA material
 
@@ -111,6 +135,7 @@ Argo CD (and plain **`helm template`**) runs **client-side**: **`helm lookup()`*
 * v0.0.17: **`argocd.argoproj.io/ignore-differences`** now embeds **`jsonPointers`** and **`jqPathExpressions`** for the injected data key (correct jq for keys like **`ca-bundle.crt`**)
 * v0.0.18: Default injected trust drift ignore now targets full **`/data`** (**`jqPathExpressions: [.data]`**) to reduce persistent OutOfSync when injected keys vary
 * v0.1.0: Split responsibilities by scope: this chart now focuses on cluster-wide Vault CSI trust/config components only; app-level SecretProviderClass rendering moves to a dedicated SPC chart
+* v0.1.1: Bundle HashiCorp **`vault`** subchart for Vault **CSI provider**, default projected trust mount aligned with synced **`ConfigMap`**, OpenShift **`privileged`** SCC **RoleBinding**; install release in **`vault`** namespace by default so projection works
 
 {{ template "chart.homepageLine" . }}
 

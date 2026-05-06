@@ -6,6 +6,13 @@ ocpSecretsStoreCsiVault:
     # -- When true, install cluster-wide manifests owned by this chart (currently the optional Vault CSI TLS CA sync ConfigMap).
     installDefaultManifests: true
 
+  # -- HashiCorp Vault Helm subchart: deploys the Vault CSI provider DaemonSet and related RBAC when enabled. Disable if you only render trust `ConfigMap` templates from another release (not recommended for new installs).
+  vaultCsiProvider:
+    enabled: true
+    # -- When true with CSI enabled on OpenShift, grant the provider ServiceAccount the `privileged` SCC.
+    openshiftPrivilegedSCCRoleBinding:
+      enabled: true
+
   # -- Provider trust-bundle sourcing for Vault CSI. Supports CNO injected trust, inline PEM, or optional cluster lookup-based copy flows for hub/spoke patterns. Nested: `syncProviderCaConfigMap`, `hostCluster`, `clientCluster`.
   caProvider:
     # -- Enables CA source resolution helpers and optional synced ConfigMap rendering.
@@ -65,3 +72,39 @@ global:
 
 clusterGroup:
   applications: {}
+
+# -- HashiCorp `vault` subchart (https://github.com/hashicorp/vault-helm). Defaults: CSI provider only (no Vault server), OpenShift paths and UBI images. Keep `csi.volumes` ConfigMap `name` aligned with `ocpSecretsStoreCsiVault.caProvider.syncProviderCaConfigMap.configMapName` (Helm values do not cross-reference keys). Install this Helm release into the **same namespace** as that ConfigMap (default `vault`) so the projected volume can mount it.
+# @default -- see nested keys
+vault:
+  global:
+    openshift: true
+    # -- Spokes / external Vault: set to the reachable Vault URL (for example https://vault-vault.apps.<hubClusterDomain>).
+    externalVaultAddr: ""
+  injector:
+    enabled: false
+  server:
+    enabled: false
+  ui:
+    enabled: false
+  csi:
+    enabled: true
+    agent:
+      enabled: false
+    daemonSet:
+      providersDir: /etc/kubernetes/secrets-store-csi-providers
+    image:
+      repository: registry.connect.redhat.com/hashicorp/vault-csi-provider
+      tag: 1.7.0-ubi
+      pullPolicy: IfNotPresent
+    volumes:
+      - name: openshift-sscsi-vault-ca
+        projected:
+          defaultMode: 420
+          sources:
+            - configMap:
+                name: openshift-sscsi-vault-vault-tls-ca
+                optional: true
+    volumeMounts:
+      - name: openshift-sscsi-vault-ca
+        mountPath: /etc/pki/vault-ca
+        readOnly: true

@@ -1,12 +1,17 @@
 ---
 apiVersion: v2
 description: >-
-  Helm chart for cluster-wide Vault Secrets Store CSI support on OpenShift. It focuses on
-  provider-facing trust material (optional synced CA ConfigMap) across hub, spoke, and external
-  Vault topologies. App-specific SecretProviderClass manifests are split into a dedicated chart.
+  OpenShift Vault Secrets Store CSI: optional synced TLS trust ConfigMap for the provider,
+  HashiCorp Vault CSI provider DaemonSet (hub or spoke), projected trust mount, and OpenShift SCC
+  wiring. Per-application SecretProviderClass manifests use the vp-sscsi-spc library chart.
 keywords:
   - openshift
   - secrets-store-csi-driver
   - vault
 name: openshift-sscsi-vault
-version: 0.1.0
+version: 0.1.1
+dependencies:
+  - name: vault
+    version: 0.32.0
+    repository: https://helm.releases.hashicorp.com
+    condition: ocpSecretsStoreCsiVault.vaultCsiProvider.enabled

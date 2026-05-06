@@ -1,0 +1,32 @@
+---
+suite: Vault CSI DaemonSet trust volume projection
+templates:
+  - charts/vault/templates/csi-daemonset.yaml
+release:
+  name: rel
+  namespace: vault
+tests:
+  - it: projects default openshift-sscsi-vault TLS ConfigMap at /etc/pki/vault-ca
+    set:
+      ocpSecretsStoreCsiVault:
+        vaultCsiProvider:
+          enabled: true
+    asserts:
+      - isKind:
+          of: DaemonSet
+      - contains:
+          path: spec.template.spec.volumes
+          content:
+            name: openshift-sscsi-vault-ca
+            projected:
+              defaultMode: 420
+              sources:
+                - configMap:
+                    name: openshift-sscsi-vault-vault-tls-ca
+                    optional: true
+      - contains:
+          path: spec.template.spec.containers[0].volumeMounts
+          content:
+            name: openshift-sscsi-vault-ca
+            mountPath: /etc/pki/vault-ca
+            readOnly: true

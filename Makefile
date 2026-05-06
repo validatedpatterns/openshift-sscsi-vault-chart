@@ -13,12 +13,16 @@ PODMAN_ARGS := --security-opt label=disable --net=host --rm --passwd-entry "$(MY
 help: ## This help message
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^(\s|[a-zA-Z_0-9-])+:.*?##/ { printf "  \033[36m%-35s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+.PHONY: helm-deps
+helm-deps: ## Download chart dependencies (required before lint/template with subcharts)
+	helm dependency update .
+
 .PHONY: helm-lint
-helm-lint: ## Runs helm lint against the chart
+helm-lint: helm-deps ## Runs helm lint against the chart
 	helm lint .
 
 .PHONY: helm-unittest
-helm-unittest: ## Runs the helm unit tests
+helm-unittest: helm-deps ## Runs the helm unit tests
 	podman run $(PODMAN_ARGS) -v $(PWD):/apps:rw,Z -w /apps $(HELM_UNITTEST_IMAGE) .
 
 .PHONY: helm-docs

@@ -1,0 +1,64 @@
+---
+suite: OpenShift Vault CSI privileged SCC RoleBinding
+templates:
+  - templates/openshift-vault-csi-scc-rolebinding.yaml
+release:
+  name: rel
+  namespace: vault
+tests:
+  - it: renders RoleBinding when vault CSI provider and OpenShift CSI are enabled
+    set:
+      ocpSecretsStoreCsiVault:
+        vaultCsiProvider:
+          enabled: true
+          openshiftPrivilegedSCCRoleBinding:
+            enabled: true
+      vault:
+        global:
+          openshift: true
+        csi:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 1
+      - isKind:
+          of: RoleBinding
+      - equal:
+          path: roleRef.name
+          value: system:openshift:scc:privileged
+      - equal:
+          path: subjects[0].name
+          value: rel-vault-csi-provider
+      - equal:
+          path: subjects[0].namespace
+          value: vault
+
+  - it: renders nothing when vault CSI provider subchart is disabled
+    set:
+      ocpSecretsStoreCsiVault:
+        vaultCsiProvider:
+          enabled: false
+      vault:
+        global:
+          openshift: true
+        csi:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: renders nothing when SCC RoleBinding is disabled
+    set:
+      ocpSecretsStoreCsiVault:
+        vaultCsiProvider:
+          enabled: true
+          openshiftPrivilegedSCCRoleBinding:
+            enabled: false
+      vault:
+        global:
+          openshift: true
+        csi:
+          enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0
